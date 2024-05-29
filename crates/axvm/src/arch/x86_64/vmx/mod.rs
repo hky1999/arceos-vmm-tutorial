@@ -1,3 +1,4 @@
+mod definitions;
 mod structs;
 mod vcpu;
 mod vmcs;
@@ -11,7 +12,9 @@ use crate::arch::msr::Msr;
 use crate::hal::AxvmHal;
 use axerrno::{ax_err, ax_err_type, AxResult};
 
+pub use self::definitions::VmxExitReason;
 pub use self::vcpu::VmxVcpu as AxvmVcpu;
+pub use self::vmcs::VmxExitInfo;
 pub use self::VmxPerCpuState as ArchPerCpuState;
 
 pub fn has_hardware_support() -> bool {

@@ -1,4 +1,5 @@
-use axvm::{AxvmHal, HostPhysAddr, HostVirtAddr};
+use super::vmexit;
+use axvm::{AxvmHal, AxvmVcpu, HostPhysAddr, HostVirtAddr};
 
 const PAGE_SIZE: usize = 0x1000;
 
@@ -22,5 +23,9 @@ impl AxvmHal for AxvmHalImpl {
 
     fn virt_to_phys(vaddr: HostVirtAddr) -> HostPhysAddr {
         axhal::mem::virt_to_phys(vaddr)
+    }
+
+    fn vmexit_handler(vcpu: &mut AxvmVcpu<Self>) {
+        vmexit::vmexit_handler(vcpu).unwrap()
     }
 }

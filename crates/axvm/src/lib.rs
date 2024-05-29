@@ -1,16 +1,20 @@
 #![no_std]
+#![feature(asm_const)]
 #![feature(concat_idents)]
+#![feature(naked_functions)]
 
 #[macro_use]
 extern crate log;
 
-mod arch;
 mod hal;
 mod mm;
 
-use arch::{ArchPerCpuState, AxvmVcpu};
+pub mod arch;
+
+use arch::ArchPerCpuState;
 use axerrno::{ax_err, AxResult};
 
+pub use arch::AxvmVcpu;
 pub use hal::AxvmHal;
 pub use mm::{GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
 
@@ -49,12 +53,12 @@ impl<H: AxvmHal> AxvmPerCpu<H> {
         self.arch.hardware_disable()
     }
 
-    /// Create a [`AxvmVcpu`].
-    pub fn create_vcpu(&self) -> AxResult<AxvmVcpu<H>> {
+    /// Create a [`AxvmVcpu`], set the entry point to `entry`.
+    pub fn create_vcpu(&self, entry: GuestPhysAddr) -> AxResult<AxvmVcpu<H>> {
         if !self.is_enabled() {
             ax_err!(BadState, "virtualization is not enabled")
         } else {
-            AxvmVcpu::new(&self.arch)
+            AxvmVcpu::new(&self.arch, entry)
         }
     }
 }
