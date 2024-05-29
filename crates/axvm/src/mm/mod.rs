@@ -1,10 +1,14 @@
 use axerrno::{ax_err_type, AxResult};
 use core::marker::PhantomData;
 use memory_addr::{PhysAddr, VirtAddr};
+use page_table_entry::MappingFlags;
 
 use crate::AxvmHal;
 
-pub const PAGE_SIZE: usize = 0x1000;
+mod npt;
+
+pub(crate) use memory_addr::PAGE_SIZE_4K as PAGE_SIZE;
+pub use npt::AxNestedPageTable;
 
 /// Guest virtual address.
 pub type GuestVirtAddr = usize;
@@ -14,6 +18,15 @@ pub type GuestPhysAddr = usize;
 pub type HostVirtAddr = VirtAddr;
 /// Host physical address.
 pub type HostPhysAddr = PhysAddr;
+
+/// Information about nested page faults.
+#[derive(Debug)]
+pub struct NestedPageFaultInfo {
+    /// Access type that caused the nested page fault.
+    pub access_flags: MappingFlags,
+    /// Guest physical address that caused the nested page fault.
+    pub fault_guest_paddr: GuestPhysAddr,
+}
 
 /// A 4K-sized contiguous physical memory page, it will deallocate the page
 /// automatically on drop.

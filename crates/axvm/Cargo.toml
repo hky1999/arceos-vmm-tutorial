@@ -17,6 +17,8 @@ numeric-enum-macro = "0.2"
 # System independent crates provided by ArceOS, these crates could be imported by remote url. 
 axerrno = { path = "../../arceos/crates/axerrno" }
 memory_addr = { path = "../../arceos/crates/memory_addr" }
+page_table = { path = "../../arceos/crates/page_table" }
+page_table_entry = { path = "../../arceos/crates/page_table_entry" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.52"

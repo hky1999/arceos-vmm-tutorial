@@ -1,7 +1,6 @@
 use super::vmexit;
 use axvm::{AxvmHal, AxvmVcpu, HostPhysAddr, HostVirtAddr};
-
-const PAGE_SIZE: usize = 0x1000;
+use memory_addr::PAGE_SIZE_4K as PAGE_SIZE;
 
 pub struct AxvmHalImpl;
 

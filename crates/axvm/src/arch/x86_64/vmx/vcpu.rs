@@ -14,8 +14,7 @@ use super::vmcs::{
 };
 use super::VmxPerCpuState;
 use crate::arch::{msr::Msr, GeneralRegisters};
-use crate::hal::AxvmHal;
-use crate::GuestPhysAddr;
+use crate::{AxvmHal, GuestPhysAddr, HostPhysAddr, NestedPageFaultInfo};
 use axerrno::AxResult;
 
 /// A virtual CPU within a guest.
@@ -27,13 +26,17 @@ pub struct VmxVcpu<H: AxvmHal> {
 }
 
 impl<H: AxvmHal> VmxVcpu<H> {
-    pub(crate) fn new(percpu: &VmxPerCpuState<H>, entry: GuestPhysAddr) -> AxResult<Self> {
+    pub(crate) fn new(
+        percpu: &VmxPerCpuState<H>,
+        entry: GuestPhysAddr,
+        ept_root: HostPhysAddr,
+    ) -> AxResult<Self> {
         let mut vcpu = Self {
             guest_regs: GeneralRegisters::default(),
             host_stack_top: 0,
             vmcs: VmxRegion::new(percpu.vmcs_revision_id, false)?,
         };
-        vcpu.setup_vmcs(entry)?;
+        vcpu.setup_vmcs(entry, ept_root)?;
         info!("[AxVM] created VmxVcpu(vmcs: {:#x})", vcpu.vmcs.phys_addr());
         Ok(vcpu)
     }
@@ -51,6 +54,16 @@ impl<H: AxvmHal> VmxVcpu<H> {
         vmcs::exit_info()
     }
 
+    /// Information for VM exits due to nested page table faults (EPT violation).
+    pub fn nested_page_fault_info(&self) -> AxResult<NestedPageFaultInfo> {
+        vmcs::ept_violation_info()
+    }
+
+    /// Set guest page table root. (`CR3`)
+    pub fn set_page_table_root(&mut self, cr3: GuestPhysAddr) {
+        VmcsGuestNW::CR3.write(cr3).unwrap()
+    }
+
     /// Guest general-purpose registers.
     pub fn regs(&self) -> &GeneralRegisters {
         &self.guest_regs
@@ -61,6 +74,16 @@ impl<H: AxvmHal> VmxVcpu<H> {
         &mut self.guest_regs
     }
 
+    /// Guest stack pointer. (`RSP`)
+    pub fn stack_pointer(&self) -> usize {
+        VmcsGuestNW::RSP.read().unwrap()
+    }
+
+    /// Set guest stack pointer. (`RSP`)
+    pub fn set_stack_pointer(&mut self, rsp: usize) {
+        VmcsGuestNW::RSP.write(rsp).unwrap()
+    }
+
     /// Advance guest `RIP` by `instr_len` bytes.
     pub fn advance_rip(&mut self, instr_len: u8) -> AxResult {
         Ok(VmcsGuestNW::RIP.write(VmcsGuestNW::RIP.read()? + instr_len as usize)?)
@@ -69,7 +92,7 @@ impl<H: AxvmHal> VmxVcpu<H> {
 
 // Implementation of private methods
 impl<H: AxvmHal> VmxVcpu<H> {
-    fn setup_vmcs(&mut self, entry: GuestPhysAddr) -> AxResult {
+    fn setup_vmcs(&mut self, entry: GuestPhysAddr, ept_root: HostPhysAddr) -> AxResult {
         let paddr = self.vmcs.phys_addr().as_usize() as u64;
         unsafe {
             vmx::vmclear(paddr)?;
@@ -77,7 +100,7 @@ impl<H: AxvmHal> VmxVcpu<H> {
         }
         self.setup_vmcs_host()?;
         self.setup_vmcs_guest(entry)?;
-        self.setup_vmcs_control()?;
+        self.setup_vmcs_control(ept_root)?;
         Ok(())
     }
 
@@ -165,7 +188,7 @@ impl<H: AxvmHal> VmxVcpu<H> {
         VmcsGuestNW::IDTR_BASE.write(0)?;
         VmcsGuest32::IDTR_LIMIT.write(0xffff)?;
 
-        VmcsGuestNW::CR3.write(Cr3::read_raw().0.start_address().as_u64() as _)?; // TODO
+        VmcsGuestNW::CR3.write(0)?;
         VmcsGuestNW::DR7.write(0x400)?;
         VmcsGuestNW::RSP.write(0)?;
         VmcsGuestNW::RIP.write(entry)?;
@@ -186,7 +209,7 @@ impl<H: AxvmHal> VmxVcpu<H> {
         Ok(())
     }
 
-    fn setup_vmcs_control(&mut self) -> AxResult {
+    fn setup_vmcs_control(&mut self, ept_root: HostPhysAddr) -> AxResult {
         // Intercept NMI, pass-through external interrupts.
         use super::vmcs::controls::*;
         use PinbasedControls as PinCtrl;
@@ -208,13 +231,13 @@ impl<H: AxvmHal> VmxVcpu<H> {
             (CpuCtrl::CR3_LOAD_EXITING | CpuCtrl::CR3_STORE_EXITING).bits(),
         )?;
 
-        // Enable RDTSCP, INVPCID.
+        // Enable EPT, RDTSCP, INVPCID.
         use SecondaryControls as CpuCtrl2;
         vmcs::set_control(
             VmcsControl32::SECONDARY_PROCBASED_EXEC_CONTROLS,
             Msr::IA32_VMX_PROCBASED_CTLS2,
             0,
-            (CpuCtrl2::ENABLE_RDTSCP | CpuCtrl2::ENABLE_INVPCID).bits(),
+            (CpuCtrl2::ENABLE_EPT | CpuCtrl2::ENABLE_RDTSCP | CpuCtrl2::ENABLE_INVPCID).bits(),
             0,
         )?;
 
@@ -243,6 +266,8 @@ impl<H: AxvmHal> VmxVcpu<H> {
                 .bits(),
             0,
         )?;
+
+        vmcs::set_ept_pointer(ept_root)?;
 
         // No MSR switches if hypervisor doesn't use and there is only one vCPU.
         VmcsControl32::VMEXIT_MSR_STORE_COUNT.write(0)?;

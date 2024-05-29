@@ -2,6 +2,7 @@
 #![feature(asm_const)]
 #![feature(concat_idents)]
 #![feature(naked_functions)]
+#![feature(const_trait_impl)]
 
 #[macro_use]
 extern crate log;
@@ -16,6 +17,7 @@ use axerrno::{ax_err, AxResult};
 
 pub use arch::AxvmVcpu;
 pub use hal::AxvmHal;
+pub use mm::{AxNestedPageTable, NestedPageFaultInfo};
 pub use mm::{GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
 
 /// Whether the hardware has virtualization support.
@@ -53,12 +55,17 @@ impl<H: AxvmHal> AxvmPerCpu<H> {
         self.arch.hardware_disable()
     }
 
-    /// Create a [`AxvmVcpu`], set the entry point to `entry`.
-    pub fn create_vcpu(&self, entry: GuestPhysAddr) -> AxResult<AxvmVcpu<H>> {
+    /// Create a [`AxvmVcpu`], set the entry point to `entry`, set the nested
+    /// page table root to `npt_root`.
+    pub fn create_vcpu(
+        &self,
+        entry: GuestPhysAddr,
+        npt_root: HostPhysAddr,
+    ) -> AxResult<AxvmVcpu<H>> {
         if !self.is_enabled() {
             ax_err!(BadState, "virtualization is not enabled")
         } else {
-            AxvmVcpu::new(&self.arch, entry)
+            AxvmVcpu::new(&self.arch, entry, npt_root)
         }
     }
 }

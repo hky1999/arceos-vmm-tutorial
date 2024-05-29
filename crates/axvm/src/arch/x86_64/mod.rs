@@ -14,4 +14,4 @@ cfg_if::cfg_if! {
 pub(crate) use vender::{has_hardware_support, ArchPerCpuState};
 
 pub use regs::GeneralRegisters;
-pub use vender::AxvmVcpu;
+pub use vender::{AxvmVcpu, X64NestedPageTable};
