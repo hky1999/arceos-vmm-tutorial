@@ -1,0 +1,21 @@
+[package]
+name = "axvm"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["vmx"]
+vmx = []
+
+[dependencies]
+log = "0.4"
+cfg-if = "1.0"
+bitflags = "1.3"
+bit_field = "0.10"
+axerrno = { path = "../../arceos/crates/axerrno" }
+memory_addr = { path = "../../arceos/crates/memory_addr" }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86 = "0.52"
+x86_64 = "0.14"
+raw-cpuid = "11.0"
