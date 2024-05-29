@@ -1,4 +1,6 @@
 mod structs;
+mod vcpu;
+mod vmcs;
 
 use raw_cpuid::CpuId;
 use x86::bits64::vmx;
@@ -9,6 +11,7 @@ use crate::arch::msr::Msr;
 use crate::hal::AxvmHal;
 use axerrno::{ax_err, ax_err_type, AxResult};
 
+pub use self::vcpu::VmxVcpu as AxvmVcpu;
 pub use self::VmxPerCpuState as ArchPerCpuState;
 
 pub fn has_hardware_support() -> bool {
@@ -104,7 +107,7 @@ impl<H: AxvmHal> VmxPerCpuState<H> {
                 )
             })?;
         }
-        info!("[RVM] successed to turn on VMX.");
+        info!("[AxVM] successed to turn on VMX.");
 
         Ok(())
     }
@@ -125,15 +128,9 @@ impl<H: AxvmHal> VmxPerCpuState<H> {
             // Remove VMXE bit in CR4.
             Cr4::update(|cr4| cr4.remove(Cr4Flags::VIRTUAL_MACHINE_EXTENSIONS));
         };
-        info!("[RVM] successed to turn off VMX.");
+        info!("[AxVM] successed to turn off VMX.");
 
         self.vmx_region = unsafe { VmxRegion::uninit() };
         Ok(())
     }
 }
-
-// impl From<VmFail> for AxError {
-//     fn from(err: VmFail) -> Self {
-//         ax_err_type!(BadState, format_args!("VMX instruction failed: {:?}", err))
-//     }
-// }

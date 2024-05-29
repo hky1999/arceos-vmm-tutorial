@@ -28,7 +28,7 @@ impl<H: AxvmHal> PhysFrame<H> {
         let start_paddr = H::alloc_page()
             .ok_or_else(|| ax_err_type!(NoMemory, "allocate physical frame failed"))?;
         assert_ne!(start_paddr.as_usize(), 0);
-        debug!("[RVM] allocated PhysFrame({:#x})", start_paddr);
+        debug!("[AxVM] allocated PhysFrame({:#x})", start_paddr);
         Ok(Self {
             start_paddr,
             _phantom: PhantomData,
@@ -65,7 +65,7 @@ impl<H: AxvmHal> Drop for PhysFrame<H> {
     fn drop(&mut self) {
         if self.start_paddr.as_usize() > 0 {
             H::dealloc_page(self.start_paddr);
-            debug!("[RVM] deallocated PhysFrame({:#x})", self.start_paddr);
+            debug!("[AxVM] deallocated PhysFrame({:#x})", self.start_paddr);
         }
     }
 }

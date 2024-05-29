@@ -8,8 +8,8 @@ mod arch;
 mod hal;
 mod mm;
 
-use arch::ArchPerCpuState;
-use axerrno::AxResult;
+use arch::{ArchPerCpuState, AxvmVcpu};
+use axerrno::{ax_err, AxResult};
 
 pub use hal::AxvmHal;
 pub use mm::{GuestPhysAddr, GuestVirtAddr, HostPhysAddr, HostVirtAddr};
@@ -47,6 +47,15 @@ impl<H: AxvmHal> AxvmPerCpu<H> {
     /// Disable hardware virtualization on the current CPU.
     pub fn hardware_disable(&mut self) -> AxResult {
         self.arch.hardware_disable()
+    }
+
+    /// Create a [`AxvmVcpu`].
+    pub fn create_vcpu(&self) -> AxResult<AxvmVcpu<H>> {
+        if !self.is_enabled() {
+            ax_err!(BadState, "virtualization is not enabled")
+        } else {
+            AxvmVcpu::new(&self.arch)
+        }
     }
 }
 

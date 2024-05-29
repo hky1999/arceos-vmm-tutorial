@@ -45,6 +45,35 @@ log_level = warn
 
 Starting virtualization...
 Hardware support: true
-Hardware enable: Ok(())
+VmxVcpu {
+    guest_regs: GeneralRegisters {
+        rax: 0x0,
+        rcx: 0x0,
+        rdx: 0x0,
+        rbx: 0x0,
+        _unused_rsp: 0x0,
+        rbp: 0x0,
+        rsi: 0x0,
+        rdi: 0x0,
+        r8: 0x0,
+        r9: 0x0,
+        r10: 0x0,
+        r11: 0x0,
+        r12: 0x0,
+        r13: 0x0,
+        r14: 0x0,
+        r15: 0x0,
+    },
+    rip: 0x0,
+    rsp: 0x0,
+    rflags: 0x2,
+    cr0: 0x30,
+    cr3: 0x0,
+    cr4: 0x2000,
+    cs: 0x0,
+    fs_base: 0x0,
+    gs_base: 0x0,
+    tss: 0x0,
+}
 ......
 

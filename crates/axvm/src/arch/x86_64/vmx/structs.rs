@@ -1,10 +1,10 @@
 use bit_field::BitField;
 use bitflags::bitflags;
 
-use axerrno::AxResult;
 use crate::arch::msr::{Msr, MsrReadWrite};
 use crate::mm::PhysFrame;
-use crate::{HostPhysAddr, AxvmHal};
+use crate::{AxvmHal, HostPhysAddr};
+use axerrno::AxResult;
 
 /// VMCS/VMXON region in 4K size. (SDM Vol. 3C, Section 24.2)
 #[derive(Debug)]

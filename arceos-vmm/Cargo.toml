@@ -6,7 +6,10 @@ authors = ["Keyang Hu <976929993@qq.com>"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# System dependent modules provided by ArceOS.
 axstd = { path = "../arceos/ulib/axstd", features = ["alloc"], optional = true }
-axvm = { path = "../crates/axvm" }
 axalloc = { path = "../arceos/modules/axalloc" }
 axhal = { path = "../arceos/modules/axhal" }
+
+# System independent crates used for constructing hypervisor.
+axvm = { path = "../crates/axvm" }
