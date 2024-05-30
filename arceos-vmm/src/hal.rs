@@ -27,4 +27,8 @@ impl AxvmHal for AxvmHalImpl {
     fn vmexit_handler(vcpu: &mut AxvmVcpu<Self>) {
         vmexit::vmexit_handler(vcpu).unwrap()
     }
+
+    fn current_time_nanos() -> u64 {
+        axhal::time::current_time_nanos()
+    }
 }

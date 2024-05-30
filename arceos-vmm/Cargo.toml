@@ -16,6 +16,7 @@ axstd = { path = "../arceos/ulib/axstd", features = [
     "alloc",
     "paging",
     "fs",
+    "irq",
 ], optional = true }
 axalloc = { path = "../arceos/modules/axalloc" }
 axhal = { path = "../arceos/modules/axhal" }

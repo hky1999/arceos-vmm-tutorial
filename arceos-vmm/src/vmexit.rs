@@ -1,4 +1,4 @@
-use super::device_emu;
+use super::device_emu::{self, VirtLocalApic};
 use super::hal::AxvmHalImpl;
 use axerrno::{AxError, AxResult};
 use axvm::arch::{VmxExitInfo, VmxExitReason};
@@ -7,7 +7,17 @@ use axvm::AxvmVcpu;
 type Vcpu = AxvmVcpu<AxvmHalImpl>;
 
 const VM_EXIT_INSTR_LEN_CPUID: u8 = 2;
+const VM_EXIT_INSTR_LEN_RDMSR: u8 = 2;
+const VM_EXIT_INSTR_LEN_WRMSR: u8 = 2;
 const VM_EXIT_INSTR_LEN_VMCALL: u8 = 3;
+
+fn handle_external_interrupt(vcpu: &mut Vcpu) -> AxResult {
+    let int_info = vcpu.interrupt_exit_info()?;
+    trace!("VM-exit: external interrupt: {:#x?}", int_info);
+    assert!(int_info.valid);
+    axhal::trap::handle_irq_extern(int_info.vector as usize);
+    Ok(())
+}
 
 fn handle_cpuid(vcpu: &mut Vcpu) -> AxResult {
     use raw_cpuid::{cpuid, CpuIdResult};
@@ -119,6 +129,55 @@ fn handle_io_instruction(vcpu: &mut Vcpu, exit_info: &VmxExitInfo) -> AxResult {
     Ok(())
 }
 
+fn handle_msr_read(vcpu: &mut Vcpu) -> AxResult {
+    let msr = vcpu.regs().rcx as u32;
+
+    use x86::msr::*;
+    let res = if msr == IA32_APIC_BASE {
+        let mut apic_base = unsafe { rdmsr(IA32_APIC_BASE) };
+        apic_base |= 1 << 11 | 1 << 10; // enable xAPIC and x2APIC
+        Ok(apic_base)
+    } else if VirtLocalApic::msr_range().contains(&msr) {
+        VirtLocalApic::rdmsr(vcpu, msr)
+    } else {
+        Err(AxError::Unsupported)
+    };
+
+    if let Ok(value) = res {
+        debug!("VM exit: RDMSR({:#x}) -> {:#x}", msr, value);
+        vcpu.regs_mut().rax = value & 0xffff_ffff;
+        vcpu.regs_mut().rdx = value >> 32;
+    } else {
+        panic!("Failed to handle RDMSR({:#x}): {:?}", msr, res);
+    }
+    vcpu.advance_rip(VM_EXIT_INSTR_LEN_RDMSR)?;
+    Ok(())
+}
+
+fn handle_msr_write(vcpu: &mut Vcpu) -> AxResult {
+    let msr = vcpu.regs().rcx as u32;
+    let value = (vcpu.regs().rax & 0xffff_ffff) | (vcpu.regs().rdx << 32);
+    debug!("VM exit: WRMSR({:#x}) <- {:#x}", msr, value);
+
+    use x86::msr::*;
+    let res = if msr == IA32_APIC_BASE {
+        Ok(()) // ignore
+    } else if VirtLocalApic::msr_range().contains(&msr) {
+        VirtLocalApic::wrmsr(vcpu, msr, value)
+    } else {
+        Err(AxError::Unsupported)
+    };
+
+    if res.is_err() {
+        panic!(
+            "Failed to handle WRMSR({:#x}) <- {:#x}: {:?}",
+            msr, value, res
+        );
+    }
+    vcpu.advance_rip(VM_EXIT_INSTR_LEN_WRMSR)?;
+    Ok(())
+}
+
 fn handle_ept_violation(vcpu: &Vcpu, guest_rip: usize) -> AxResult {
     let fault_info = vcpu.nested_page_fault_info()?;
     panic!(
@@ -136,9 +195,13 @@ pub fn vmexit_handler(vcpu: &mut Vcpu) -> AxResult {
     }
 
     let res = match exit_info.exit_reason {
+        VmxExitReason::EXTERNAL_INTERRUPT => handle_external_interrupt(vcpu),
+        VmxExitReason::INTERRUPT_WINDOW => vcpu.set_interrupt_window(false),
         VmxExitReason::CPUID => handle_cpuid(vcpu),
         VmxExitReason::VMCALL => handle_hypercall(vcpu),
         VmxExitReason::IO_INSTRUCTION => handle_io_instruction(vcpu, &exit_info),
+        VmxExitReason::MSR_READ => handle_msr_read(vcpu),
+        VmxExitReason::MSR_WRITE => handle_msr_write(vcpu),
         VmxExitReason::EPT_VIOLATION => handle_ept_violation(vcpu, exit_info.guest_rip),
         _ => panic!(
             "Unhandled VM-Exit reason {:?}:\n{:#x?}",

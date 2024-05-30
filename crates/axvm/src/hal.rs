@@ -12,4 +12,6 @@ pub trait AxvmHal: Sized {
     fn virt_to_phys(vaddr: HostVirtAddr) -> HostPhysAddr;
     /// VM-Exit handler.
     fn vmexit_handler(vcpu: &mut crate::AxvmVcpu<Self>);
+    /// Current time in nanoseconds.
+    fn current_time_nanos() -> u64;
 }

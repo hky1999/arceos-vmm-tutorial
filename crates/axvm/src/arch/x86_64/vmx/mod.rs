@@ -17,7 +17,7 @@ use axerrno::{ax_err, ax_err_type, AxResult};
 pub use self::definitions::VmxExitReason;
 pub use self::ept::ExtendedPageTable as X64NestedPageTable;
 pub use self::vcpu::VmxVcpu as AxvmVcpu;
-pub use self::vmcs::{VmxExitInfo, VmxIoExitInfo};
+pub use self::vmcs::{VmxExitInfo, VmxInterruptInfo, VmxIoExitInfo};
 pub use self::VmxPerCpuState as ArchPerCpuState;
 
 pub fn has_hardware_support() -> bool {
