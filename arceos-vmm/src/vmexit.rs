@@ -1,6 +1,7 @@
+use super::device_emu;
 use super::hal::AxvmHalImpl;
-use axerrno::AxResult;
-use axvm::arch::VmxExitReason;
+use axerrno::{AxError, AxResult};
+use axvm::arch::{VmxExitInfo, VmxExitReason};
 use axvm::AxvmVcpu;
 
 type Vcpu = AxvmVcpu<AxvmHalImpl>;
@@ -14,7 +15,7 @@ fn handle_cpuid(vcpu: &mut Vcpu) -> AxResult {
     const LEAF_FEATURE_INFO: u32 = 0x1;
     const LEAF_HYPERVISOR_INFO: u32 = 0x4000_0000;
     const LEAF_HYPERVISOR_FEATURE: u32 = 0x4000_0001;
-    const VENDOR_STR: &[u8; 12] = b"RVMRVMRVMRVM";
+    const VENDOR_STR: &[u8; 12] = b"ARCEOSARCEOS";
     let vendor_regs = unsafe { &*(VENDOR_STR.as_ptr() as *const [u32; 3]) };
 
     let regs = vcpu.regs_mut();
@@ -66,6 +67,58 @@ fn handle_hypercall(vcpu: &mut Vcpu) -> AxResult {
     Ok(())
 }
 
+fn handle_io_instruction(vcpu: &mut Vcpu, exit_info: &VmxExitInfo) -> AxResult {
+    let io_info = vcpu.io_exit_info()?;
+    trace!(
+        "VM exit: I/O instruction @ {:#x}: {:#x?}",
+        exit_info.guest_rip,
+        io_info,
+    );
+    if io_info.is_string {
+        error!("INS/OUTS instructions are not supported!");
+        return Err(AxError::Unsupported);
+    }
+    if io_info.is_repeat {
+        error!("REP prefixed I/O instructions are not supported!");
+        return Err(AxError::Unsupported);
+    }
+
+    if let Some(dev) = device_emu::all_virt_devices().find_port_io_device(io_info.port) {
+        if io_info.is_in {
+            let value = dev.read(io_info.port, io_info.access_size)?;
+            let rax = &mut vcpu.regs_mut().rax;
+            // SDM Vol. 1, Section 3.4.1.1:
+            // * 32-bit operands generate a 32-bit result, zero-extended to a 64-bit result in the
+            //   destination general-purpose register.
+            // * 8-bit and 16-bit operands generate an 8-bit or 16-bit result. The upper 56 bits or
+            //   48 bits (respectively) of the destination general-purpose register are not modified
+            //   by the operation.
+            match io_info.access_size {
+                1 => *rax = (*rax & !0xff) | (value & 0xff) as u64,
+                2 => *rax = (*rax & !0xffff) | (value & 0xffff) as u64,
+                4 => *rax = value as u64,
+                _ => unreachable!(),
+            }
+        } else {
+            let rax = vcpu.regs().rax;
+            let value = match io_info.access_size {
+                1 => rax & 0xff,
+                2 => rax & 0xffff,
+                4 => rax,
+                _ => unreachable!(),
+            } as u32;
+            dev.write(io_info.port, io_info.access_size, value)?;
+        }
+    } else {
+        panic!(
+            "Unsupported I/O port {:#x} access: {:#x?}",
+            io_info.port, io_info
+        )
+    }
+    vcpu.advance_rip(exit_info.exit_instruction_length as _)?;
+    Ok(())
+}
+
 fn handle_ept_violation(vcpu: &Vcpu, guest_rip: usize) -> AxResult {
     let fault_info = vcpu.nested_page_fault_info()?;
     panic!(
@@ -85,6 +138,7 @@ pub fn vmexit_handler(vcpu: &mut Vcpu) -> AxResult {
     let res = match exit_info.exit_reason {
         VmxExitReason::CPUID => handle_cpuid(vcpu),
         VmxExitReason::VMCALL => handle_hypercall(vcpu),
+        VmxExitReason::IO_INSTRUCTION => handle_io_instruction(vcpu, &exit_info),
         VmxExitReason::EPT_VIOLATION => handle_ept_violation(vcpu, exit_info.guest_rip),
         _ => panic!(
             "Unhandled VM-Exit reason {:?}:\n{:#x?}",

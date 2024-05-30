@@ -7,6 +7,9 @@ authors = ["Keyang Hu <976929993@qq.com>"]
 
 [dependencies]
 log = "=0.4.19"
+bitflags = "2.2"
+spin = "0.9"
+lazy_static = { version = "1.4", features = ["spin_no_std"] }
 
 # System dependent modules provided by ArceOS.
 axstd = { path = "../arceos/ulib/axstd", features = [

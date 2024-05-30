@@ -11,6 +11,7 @@ extern crate alloc;
 #[macro_use]
 extern crate log;
 
+mod device_emu;
 mod gconfig;
 mod gpm;
 mod hal;

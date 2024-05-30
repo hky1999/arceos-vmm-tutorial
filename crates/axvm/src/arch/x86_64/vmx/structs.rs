@@ -200,7 +200,7 @@ bitflags! {
 impl EPTPointer {
     pub fn from_table_phys(pml4_paddr: HostPhysAddr) -> Self {
         let aligned_addr = pml4_paddr.as_usize() & !(PAGE_SIZE - 1);
-        let flags = unsafe { Self::from_bits_unchecked(aligned_addr as u64) };
+        let flags = Self::from_bits_retain(aligned_addr as u64);
         flags | Self::MEM_TYPE_WB | Self::WALK_LENGTH_4 | Self::ENABLE_ACCESSED_DIRTY
     }
 }
