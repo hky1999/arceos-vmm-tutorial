@@ -16,9 +16,9 @@ mod gpm;
 mod hal;
 mod vmexit;
 
-use axerrno::AxResult;
+use axerrno::{AxError, AxResult};
 use axhal::mem::virt_to_phys;
-use axvm::{AxvmPerCpu, GuestPhysAddr, HostVirtAddr};
+use axvm::{AxvmPerCpu, GuestPhysAddr, HostPhysAddr, HostVirtAddr};
 use page_table_entry::MappingFlags;
 
 use self::gconfig::*;
@@ -37,44 +37,76 @@ fn gpa_as_mut_ptr(guest_paddr: GuestPhysAddr) -> *mut u8 {
     host_vaddr as *mut u8
 }
 
-fn setup_guest_page_table() {
-    use x86_64::structures::paging::{PageTable, PageTableFlags as PTF};
-    let pt1 = unsafe { &mut *(gpa_as_mut_ptr(GUEST_PT1) as *mut PageTable) };
-    let pt2 = unsafe { &mut *(gpa_as_mut_ptr(GUEST_PT2) as *mut PageTable) };
-    // identity mapping
-    pt1[0].set_addr(
-        x86_64::PhysAddr::new(GUEST_PT2 as _),
-        PTF::PRESENT | PTF::WRITABLE,
-    );
-    pt2[0].set_addr(
-        x86_64::PhysAddr::new(0),
-        PTF::PRESENT | PTF::WRITABLE | PTF::HUGE_PAGE,
-    );
+fn load_guest_image_from_file_system(file_name: &str, load_gpa: GuestPhysAddr) -> AxResult {
+    use std::io::{BufReader, Read};
+    let file = std::fs::File::open(file_name).map_err(|err| {
+        warn!(
+            "Failed to open {}, err {:?}, please check your disk.img",
+            file_name, err
+        );
+        AxError::NotFound
+    })?;
+    let buffer = unsafe {
+        core::slice::from_raw_parts_mut(
+            gpa_as_mut_ptr(load_gpa),
+            file.metadata()
+                .map_err(|err| {
+                    warn!(
+                        "Failed to get metadate of file {}, err {:?}",
+                        file_name, err
+                    );
+                    AxError::Io
+                })?
+                .size() as usize,
+        )
+    };
+    let mut file = BufReader::new(file);
+    file.read_exact(buffer).map_err(|err| {
+        warn!("Failed to read from file {}, err {:?}", file_name, err);
+        AxError::Io
+    })?;
+    Ok(())
 }
 
 fn setup_gpm() -> AxResult<GuestPhysMemorySet> {
-    setup_guest_page_table();
-
-    // copy guest code
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            test_guest as usize as *const u8,
-            gpa_as_mut_ptr(GUEST_ENTRY),
-            0x100,
-        );
-    }
+    // copy BIOS and guest images from file system
+    load_guest_image_from_file_system("rvm-bios.bin", BIOS_ENTRY)?;
+    load_guest_image_from_file_system("nimbos.bin", GUEST_ENTRY)?;
 
     // create nested page table and add mapping
     let mut gpm = GuestPhysMemorySet::new()?;
-    let guest_memory_regions = [GuestMemoryRegion {
-        // RAM
-        gpa: GUEST_PHYS_MEMORY_BASE,
-        hpa: virt_to_phys(HostVirtAddr::from(
-            gpa_as_mut_ptr(GUEST_PHYS_MEMORY_BASE) as usize
-        )),
-        size: GUEST_PHYS_MEMORY_SIZE,
-        flags: MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE,
-    }];
+    let guest_memory_regions = [
+        GuestMemoryRegion {
+            // RAM
+            gpa: GUEST_PHYS_MEMORY_BASE,
+            hpa: virt_to_phys(HostVirtAddr::from(
+                gpa_as_mut_ptr(GUEST_PHYS_MEMORY_BASE) as usize
+            )),
+            size: GUEST_PHYS_MEMORY_SIZE,
+            flags: MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE,
+        },
+        GuestMemoryRegion {
+            // IO APIC
+            gpa: 0xfec0_0000,
+            hpa: HostPhysAddr::from(0xfec0_0000),
+            size: 0x1000,
+            flags: MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
+        },
+        GuestMemoryRegion {
+            // HPET
+            gpa: 0xfed0_0000,
+            hpa: HostPhysAddr::from(0xfed0_0000),
+            size: 0x1000,
+            flags: MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
+        },
+        GuestMemoryRegion {
+            // Local APIC
+            gpa: 0xfee0_0000,
+            hpa: HostPhysAddr::from(0xfee0_0000),
+            size: 0x1000,
+            flags: MappingFlags::READ | MappingFlags::WRITE | MappingFlags::DEVICE,
+        },
+    ];
     for r in guest_memory_regions.into_iter() {
         trace!("{:#x?}", r);
         gpm.map_region(r.into())?;
@@ -93,30 +125,14 @@ fn main() {
         .expect("Failed to enable virtualization");
 
     let gpm = setup_gpm().expect("Failed to set guest physical memory set");
-    info!("{:#x?}", gpm);
+    debug!("{:#x?}", gpm);
     let mut vcpu = percpu
         .create_vcpu(GUEST_ENTRY, gpm.nest_page_table_root())
         .expect("Failed to create vcpu");
-    vcpu.set_page_table_root(GUEST_PT1);
-    vcpu.set_stack_pointer(GUEST_STACK_TOP);
-    info!("{:#x?}", vcpu);
+
+    debug!("{:#x?}", vcpu);
 
     println!("Running guest...");
 
     vcpu.run();
-}
-
-unsafe extern "C" fn test_guest() -> ! {
-    for i in 0..100 {
-        core::arch::asm!(
-            "vmcall",
-            inout("rax") i => _,
-            in("rdi") 2,
-            in("rsi") 3,
-            in("rdx") 3,
-            in("rcx") 3,
-        );
-    }
-    core::arch::asm!("mov qword ptr [$0xffff233], $2333"); // panic
-    loop {}
 }
