@@ -180,7 +180,6 @@ name = "axerrno"
 version = "0.1.0"
 dependencies = [
  "log",
- "x86",
 ]
 
 [[package]]

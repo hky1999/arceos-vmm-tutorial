@@ -140,3 +140,11 @@ impl<H: AxvmHal> VmxPerCpuState<H> {
         Ok(())
     }
 }
+
+fn as_axerr(err: x86::vmx::VmFail) -> axerrno::AxError {
+    use x86::vmx::VmFail;
+    match err {
+        VmFail::VmFailValid => ax_err_type!(BadState, vmcs::instruction_error().as_str()),
+        VmFail::VmFailInvalid => ax_err_type!(BadState, "VMCS pointer is not valid"),
+    }
+}

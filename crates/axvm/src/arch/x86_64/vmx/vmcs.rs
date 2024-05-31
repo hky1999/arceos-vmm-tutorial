@@ -9,6 +9,7 @@ use x86::bits64::vmx;
 use axerrno::{ax_err, AxResult};
 use page_table_entry::MappingFlags;
 
+use super::as_axerr;
 use super::definitions::{VmxExitReason, VmxInstructionError, VmxInterruptionType};
 use crate::{arch::msr::Msr, HostPhysAddr, NestedPageFaultInfo};
 
@@ -587,15 +588,15 @@ pub fn set_control(
     let unknown = flexible & !(set | clear); // hypervisor untouched bits
     let default = unknown & old_value; // these bits keep unchanged in old value
     let fixed1 = allowed0; // these bits are fixed to 1
-    control.write(fixed1 | default | set)?;
+    control.write(fixed1 | default | set).map_err(as_axerr)?;
     Ok(())
 }
 
 pub fn set_ept_pointer(pml4_paddr: HostPhysAddr) -> AxResult {
     use super::instructions::{invept, InvEptType};
     let eptp = super::structs::EPTPointer::from_table_phys(pml4_paddr).bits();
-    VmcsControl64::EPTP.write(eptp)?;
-    unsafe { invept(InvEptType::SingleContext, eptp)? };
+    VmcsControl64::EPTP.write(eptp).map_err(as_axerr)?;
+    unsafe { invept(InvEptType::SingleContext, eptp).map_err(as_axerr)? };
     Ok(())
 }
 
@@ -604,26 +605,34 @@ pub fn instruction_error() -> VmxInstructionError {
 }
 
 pub fn exit_info() -> AxResult<VmxExitInfo> {
-    let full_reason = VmcsReadOnly32::EXIT_REASON.read()?;
+    let full_reason = VmcsReadOnly32::EXIT_REASON.read().map_err(as_axerr)?;
     Ok(VmxExitInfo {
         exit_reason: full_reason
             .get_bits(0..16)
             .try_into()
             .expect("Unknown VM-exit reason"),
         entry_failure: full_reason.get_bit(31),
-        exit_instruction_length: VmcsReadOnly32::VMEXIT_INSTRUCTION_LEN.read()?,
-        guest_rip: VmcsGuestNW::RIP.read()?,
+        exit_instruction_length: VmcsReadOnly32::VMEXIT_INSTRUCTION_LEN
+            .read()
+            .map_err(as_axerr)?,
+        guest_rip: VmcsGuestNW::RIP.read().map_err(as_axerr)?,
     })
 }
 
 pub fn interrupt_exit_info() -> AxResult<VmxInterruptInfo> {
     // SDM Vol. 3C, Section 24.9.2
-    let info = VmcsReadOnly32::VMEXIT_INTERRUPTION_INFO.read()?;
+    let info = VmcsReadOnly32::VMEXIT_INTERRUPTION_INFO
+        .read()
+        .map_err(as_axerr)?;
     Ok(VmxInterruptInfo {
         vector: info.get_bits(0..8) as u8,
         int_type: VmxInterruptionType::try_from(info.get_bits(8..11) as u8).unwrap(),
         err_code: if info.get_bit(11) {
-            Some(VmcsReadOnly32::VMEXIT_INTERRUPTION_ERR_CODE.read()?)
+            Some(
+                VmcsReadOnly32::VMEXIT_INTERRUPTION_ERR_CODE
+                    .read()
+                    .map_err(as_axerr)?,
+            )
         } else {
             None
         },
@@ -640,19 +649,30 @@ pub fn inject_event(vector: u8, err_code: Option<u32>) -> AxResult {
     };
     let int_info = VmxInterruptInfo::from(vector, err_code);
     if let Some(err_code) = int_info.err_code {
-        VmcsControl32::VMENTRY_EXCEPTION_ERR_CODE.write(err_code)?;
+        VmcsControl32::VMENTRY_EXCEPTION_ERR_CODE
+            .write(err_code)
+            .map_err(as_axerr)?;
     }
     if int_info.int_type.is_soft() {
         VmcsControl32::VMENTRY_INSTRUCTION_LEN
-            .write(VmcsReadOnly32::VMEXIT_INSTRUCTION_LEN.read()?)?;
+            .write(
+                VmcsReadOnly32::VMEXIT_INSTRUCTION_LEN
+                    .read()
+                    .map_err(as_axerr)?,
+            )
+            .map_err(as_axerr)?;
     }
-    VmcsControl32::VMENTRY_INTERRUPTION_INFO_FIELD.write(int_info.bits())?;
+    VmcsControl32::VMENTRY_INTERRUPTION_INFO_FIELD
+        .write(int_info.bits())
+        .map_err(as_axerr)?;
     Ok(())
 }
 
 pub fn io_exit_info() -> AxResult<VmxIoExitInfo> {
     // SDM Vol. 3C, Section 27.2.1, Table 27-5
-    let qualification = VmcsReadOnlyNW::EXIT_QUALIFICATION.read()?;
+    let qualification = VmcsReadOnlyNW::EXIT_QUALIFICATION
+        .read()
+        .map_err(as_axerr)?;
     Ok(VmxIoExitInfo {
         access_size: qualification.get_bits(0..3) as u8 + 1,
         is_in: qualification.get_bit(3),
@@ -664,8 +684,12 @@ pub fn io_exit_info() -> AxResult<VmxIoExitInfo> {
 
 pub fn ept_violation_info() -> AxResult<NestedPageFaultInfo> {
     // SDM Vol. 3C, Section 27.2.1, Table 27-7
-    let qualification = VmcsReadOnlyNW::EXIT_QUALIFICATION.read()?;
-    let fault_guest_paddr = VmcsReadOnly64::GUEST_PHYSICAL_ADDR.read()? as usize;
+    let qualification = VmcsReadOnlyNW::EXIT_QUALIFICATION
+        .read()
+        .map_err(as_axerr)?;
+    let fault_guest_paddr = VmcsReadOnly64::GUEST_PHYSICAL_ADDR
+        .read()
+        .map_err(as_axerr)? as usize;
     let mut access_flags = MappingFlags::empty();
     if qualification.get_bit(0) {
         access_flags |= MappingFlags::READ;
